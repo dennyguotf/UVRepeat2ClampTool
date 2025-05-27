@@ -55,6 +55,14 @@ public class AtlasGenerator
         // 按面积排序（从大到小）
         textureInfos.Sort((a, b) => (b.width * b.height).CompareTo(a.width * a.height));
 
+        // 增强边缘扩展以应对Mipmap问题
+        // 计算需要扩展的像素数：基于Atlas尺寸动态计算
+        int edgePadding = Utility.CalculateEdgePaddingForMipmap(atlasSize);
+        if(padding < edgePadding * 2)
+        {
+            padding = edgePadding * 2;
+        }
+
         // 尝试打包
         var rects = PackRectangles(textureInfos, atlasSize, padding);
         if (rects == null)
@@ -200,7 +208,7 @@ public class AtlasGenerator
             // 如果尺寸不匹配，需要缩放
             if (readableTexture.width != rect.width || readableTexture.height != rect.height)
             {
-                readableTexture = TextureScaleUtility.CreateScaledCopy(readableTexture, rect.width, rect.height);
+                readableTexture = Utility.CreateScaledCopy(readableTexture, rect.width, rect.height);
             }
 
             // 复制像素到atlas，并添加边缘扩展以防止缝隙
@@ -224,7 +232,7 @@ public class AtlasGenerator
             
             // 增强边缘扩展以应对Mipmap问题
             // 计算需要扩展的像素数：基于Atlas尺寸动态计算
-            int edgePadding = CalculateEdgePaddingForMipmap(atlasSize);
+            int edgePadding = Utility.CalculateEdgePaddingForMipmap(atlasSize);
             
             // 多层边缘扩展
             for (int layer = 1; layer <= edgePadding; layer++)
@@ -293,24 +301,6 @@ public class AtlasGenerator
 
         atlas.Apply();
         return atlas;
-    }
-
-    /// <summary>
-    /// 根据Atlas尺寸计算边缘扩展像素数，以应对Mipmap问题
-    /// </summary>
-    /// <param name="atlasSize">Atlas尺寸</param>
-    /// <returns>边缘扩展像素数</returns>
-    private static int CalculateEdgePaddingForMipmap(int atlasSize)
-    {
-        // 计算mipmap级别数
-        int mipmapLevels = Mathf.FloorToInt(Mathf.Log(atlasSize, 2)) + 1;
-        
-        // 边缘扩展像素数应该至少覆盖最高几个mipmap级别的采样范围
-        // 经验值：Atlas尺寸的1/512，最小2像素，最大8像素
-        int padding = Mathf.Max(2, Mathf.Min(8, atlasSize / 512));
-        
-        Debug.Log($"Atlas尺寸: {atlasSize}, Mipmap级别: {mipmapLevels}, 边缘扩展: {padding}像素");
-        return padding;
     }
 
     private static Texture2D MakeTextureReadable(Texture2D texture)

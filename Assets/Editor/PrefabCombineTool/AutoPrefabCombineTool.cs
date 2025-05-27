@@ -840,7 +840,7 @@ public class AutoPrefabCombineTool : EditorWindow
                 
                 // 为Mipmap支持增加更大的边缘收缩
                 // 根据Atlas尺寸动态计算收缩量
-                float mipmapSafePadding = CalculateMipmapSafePadding(atlasSize);
+                float mipmapSafePadding = Utility.CalculateMipmapSafePadding(atlasSize);
                 Vector2 shrinkOffset = new Vector2(mipmapSafePadding, mipmapSafePadding);
                 Vector2 shrinkScale = scale - shrinkOffset * 2;
                 Vector2 adjustedOffset = offset + shrinkOffset;
@@ -852,6 +852,9 @@ public class AutoPrefabCombineTool : EditorWindow
                     shrinkScale = scale * 0.9f; // 使用90%的尺寸作为备用方案
                     adjustedOffset = offset + (scale - shrinkScale) * 0.5f;
                 }
+
+                //Vector2 shrinkScale = scale;
+                //Vector2 adjustedOffset = offset;
 
                 Debug.Log($"应用UV变换: offset({adjustedOffset.x:F3}, {adjustedOffset.y:F3}), scale({shrinkScale.x:F3}, {shrinkScale.y:F3}), 收缩量({mipmapSafePadding:F3})");
 
@@ -902,23 +905,7 @@ public class AutoPrefabCombineTool : EditorWindow
         return mesh;
     }
     
-    /// <summary>
-    /// 计算Mipmap安全的UV收缩量
-    /// </summary>
-    /// <param name="atlasSize">Atlas尺寸</param>
-    /// <returns>收缩量</returns>
-    private float CalculateMipmapSafePadding(int atlasSize)
-    {
-        // 计算边缘扩展像素数
-        int edgePadding = Mathf.Max(2, Mathf.Min(8, atlasSize / 512));
-        
-        // UV收缩量应该略大于边缘扩展，确保不会采样到边界
-        // 收缩 (edgePadding + 0.5) 个像素的距离
-        float padding = (edgePadding + 0.5f) / atlasSize;
-        
-        Debug.Log($"Atlas尺寸: {atlasSize}, 边缘扩展: {edgePadding}像素, UV收缩量: {padding:F4}");
-        return padding;
-    }
+   
 
     private struct VertexRange
     {

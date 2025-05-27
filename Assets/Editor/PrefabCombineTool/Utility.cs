@@ -1,7 +1,41 @@
 using UnityEngine;
 
-public class TextureScaleUtility
+public class Utility
 {
+    /// <summary>
+    /// 根据Atlas尺寸计算边缘扩展像素数，以应对Mipmap问题
+    /// </summary>
+    /// <param name="atlasSize">Atlas尺寸</param>
+    /// <returns>边缘扩展像素数</returns>
+    public static int CalculateEdgePaddingForMipmap(int atlasSize)
+    {
+        // 计算mipmap级别数
+        int mipmapLevels = Mathf.FloorToInt(Mathf.Log(atlasSize, 2)) + 1;
+
+        // 边缘扩展像素数应该至少覆盖最高几个mipmap级别的采样范围
+        int padding = Mathf.Max(2, mipmapLevels);  
+        Debug.Log($"Atlas尺寸: {atlasSize}, Mipmap级别: {mipmapLevels}, 边缘扩展: {padding}像素");
+        return padding;
+    }
+
+    /// <summary>
+    /// 计算Mipmap安全的UV收缩量
+    /// </summary>
+    /// <param name="atlasSize">Atlas尺寸</param>
+    /// <returns>收缩量</returns>
+    public static float CalculateMipmapSafePadding(int atlasSize)
+    {
+        // 计算边缘扩展像素数
+        int edgePadding = CalculateEdgePaddingForMipmap(atlasSize);
+
+        // UV收缩量应该略大于边缘扩展，确保不会采样到边界
+        // 收缩 (edgePadding + 0.5) 个像素的距离
+        float padding = (edgePadding + 0.5f) / atlasSize;
+
+        Debug.Log($"Atlas尺寸: {atlasSize}, 边缘扩展: {edgePadding}像素, UV收缩量: {padding:F4}");
+        return padding;
+    }
+
     public static void Bilinear(Texture2D tex, int newWidth, int newHeight)
     {
         Color[] pixels = tex.GetPixels();
