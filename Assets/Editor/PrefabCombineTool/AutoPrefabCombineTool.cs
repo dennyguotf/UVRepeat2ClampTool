@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 public class AutoPrefabCombineTool : EditorWindow
 {
@@ -706,9 +707,20 @@ public class AutoPrefabCombineTool : EditorWindow
             combinedMaterial.SetTexture("_AlbedoMap", whiteTexture); // URP兼容
         }
 
-        // 设置材质的其他属性
+        // 设置材质的其他属性，确保正确的渲染
         combinedMaterial.SetFloat("_Metallic", 0f);
         combinedMaterial.SetFloat("_Smoothness", 0.5f);
+        combinedMaterial.SetColor("_Color", Color.white); // 确保颜色为白色，不影响纹理
+        
+        // 设置渲染模式为不透明
+        combinedMaterial.SetFloat("_Mode", 0); // Opaque
+        combinedMaterial.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.One);
+        combinedMaterial.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.Zero);
+        combinedMaterial.SetInt("_ZWrite", 1);
+        combinedMaterial.DisableKeyword("_ALPHATEST_ON");
+        combinedMaterial.DisableKeyword("_ALPHABLEND_ON");
+        combinedMaterial.DisableKeyword("_ALPHAPREMULTIPLY_ON");
+        combinedMaterial.renderQueue = -1;
         
         Debug.Log($"材质创建完成: {combinedMaterial.name}");
         return combinedMaterial;
@@ -757,8 +769,19 @@ public class AutoPrefabCombineTool : EditorWindow
                     importer.isReadable = true;
                     // 设置wrap mode为Clamp
                     importer.wrapMode = TextureWrapMode.Clamp;
+                    // 设置过滤模式为双线性，减少缝隙
+                    importer.filterMode = FilterMode.Bilinear;
+                    // 确保sRGB设置正确
+                    importer.sRGBTexture = true; // 大多数Albedo纹理应该是sRGB
+                    // 禁用mipmap以避免边缘模糊
+                    importer.mipmapEnabled = false;
+                    // 设置最大纹理尺寸
+                    importer.maxTextureSize = atlasSize;
+                    // 设置压缩格式
+                    importer.textureCompression = TextureImporterCompression.Uncompressed; // 避免压缩导致的颜色失真
+                    
                     importer.SaveAndReimport();
-                    Debug.Log("Atlas纹理导入设置已配置，Wrap Mode设置为Clamp");
+                    Debug.Log("Atlas纹理导入设置已配置，Wrap Mode设置为Clamp，颜色空间设置为sRGB");
                 }
             }
             else
@@ -811,16 +834,31 @@ public class AutoPrefabCombineTool : EditorWindow
                 Vector2 offset = packResult.uvOffsets[mapping.textureIndex];
                 Vector2 scale = packResult.uvScales[mapping.textureIndex];
                 
-                Debug.Log($"应用UV变换: offset({offset.x:F3}, {offset.y:F3}), scale({scale.x:F3}, {scale.y:F3})");
+                // 添加边缘收缩以防止采样到边界外的像素
+                float shrinkAmount = 0.5f / atlasSize; // 收缩半个像素
+                Vector2 shrinkOffset = new Vector2(shrinkAmount, shrinkAmount);
+                Vector2 shrinkScale = scale - shrinkOffset * 2;
+                Vector2 adjustedOffset = offset + shrinkOffset;
+                
+                Debug.Log($"应用UV变换: offset({adjustedOffset.x:F3}, {adjustedOffset.y:F3}), scale({shrinkScale.x:F3}, {shrinkScale.y:F3})");
 
                 // 重映射该网格范围内的所有UV坐标
                 for (int i = vertexRange.start; i < vertexRange.end && i < newUVs.Length; i++)
                 {
                     Vector2 originalUV = uvs[i];
+                    
+                    // 确保原始UV在[0,1]范围内
+                    originalUV.x = Mathf.Clamp01(originalUV.x);
+                    originalUV.y = Mathf.Clamp01(originalUV.y);
+                    
                     newUVs[i] = new Vector2(
-                        offset.x + originalUV.x * scale.x,
-                        offset.y + originalUV.y * scale.y
+                        adjustedOffset.x + originalUV.x * shrinkScale.x,
+                        adjustedOffset.y + originalUV.y * shrinkScale.y
                     );
+                    
+                    // 确保新UV在有效范围内
+                    newUVs[i].x = Mathf.Clamp(newUVs[i].x, offset.x, offset.x + scale.x);
+                    newUVs[i].y = Mathf.Clamp(newUVs[i].y, offset.y, offset.y + scale.y);
                 }
                 
                 Debug.Log($"网格 {meshIdx} UV重映射完成，处理了 {vertexRange.end - vertexRange.start} 个顶点");
@@ -843,7 +881,7 @@ public class AutoPrefabCombineTool : EditorWindow
         
         if (outOfRangeCount > 0)
         {
-            Debug.LogWarning($"发现 {outOfRangeCount} 个UV坐标超出[0,1]范围，可能导致显示问题");
+            Debug.LogWarning($"发现 {outOfRangeCount} 个UV坐标超出[0,1]范围，已进行修正");
         }
 
         mesh.uv = newUVs;

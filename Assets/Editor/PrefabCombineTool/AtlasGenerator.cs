@@ -1,6 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEditor;
 
 public class AtlasGenerator
 {
@@ -177,12 +178,13 @@ public class AtlasGenerator
         
         // 设置wrap mode为Clamp
         atlas.wrapMode = TextureWrapMode.Clamp;
+        atlas.filterMode = FilterMode.Bilinear;
         
-        // 初始化为透明
+        // 初始化为白色而不是透明，避免缝隙问题
         var clearPixels = new Color[atlasSize * atlasSize];
         for (int i = 0; i < clearPixels.Length; i++)
         {
-            clearPixels[i] = Color.clear;
+            clearPixels[i] = Color.white; // 改为白色
         }
         atlas.SetPixels(clearPixels);
 
@@ -199,8 +201,10 @@ public class AtlasGenerator
                 readableTexture = TextureScaleUtility.CreateScaledCopy(readableTexture, rect.width, rect.height);
             }
 
-            // 复制像素到atlas
+            // 复制像素到atlas，并添加边缘扩展以防止缝隙
             var pixels = readableTexture.GetPixels();
+            
+            // 先复制主要区域
             for (int y = 0; y < rect.height; y++)
             {
                 for (int x = 0; x < rect.width; x++)
@@ -215,6 +219,65 @@ public class AtlasGenerator
                     }
                 }
             }
+            
+            // 扩展边缘像素以防止缝隙（边缘填充）
+            // 左边缘
+            if (rect.x > 0)
+            {
+                for (int y = 0; y < rect.height; y++)
+                {
+                    Color edgeColor = pixels[y * rect.width];
+                    atlas.SetPixel(rect.x - 1, rect.y + y, edgeColor);
+                }
+            }
+            
+            // 右边缘
+            if (rect.x + rect.width < atlasSize)
+            {
+                for (int y = 0; y < rect.height; y++)
+                {
+                    Color edgeColor = pixels[y * rect.width + (rect.width - 1)];
+                    atlas.SetPixel(rect.x + rect.width, rect.y + y, edgeColor);
+                }
+            }
+            
+            // 上边缘
+            if (rect.y > 0)
+            {
+                for (int x = 0; x < rect.width; x++)
+                {
+                    Color edgeColor = pixels[x];
+                    atlas.SetPixel(rect.x + x, rect.y - 1, edgeColor);
+                }
+            }
+            
+            // 下边缘
+            if (rect.y + rect.height < atlasSize)
+            {
+                for (int x = 0; x < rect.width; x++)
+                {
+                    Color edgeColor = pixels[(rect.height - 1) * rect.width + x];
+                    atlas.SetPixel(rect.x + x, rect.y + rect.height, edgeColor);
+                }
+            }
+            
+            // 四个角落
+            if (rect.x > 0 && rect.y > 0)
+            {
+                atlas.SetPixel(rect.x - 1, rect.y - 1, pixels[0]); // 左上角
+            }
+            if (rect.x + rect.width < atlasSize && rect.y > 0)
+            {
+                atlas.SetPixel(rect.x + rect.width, rect.y - 1, pixels[rect.width - 1]); // 右上角
+            }
+            if (rect.x > 0 && rect.y + rect.height < atlasSize)
+            {
+                atlas.SetPixel(rect.x - 1, rect.y + rect.height, pixels[(rect.height - 1) * rect.width]); // 左下角
+            }
+            if (rect.x + rect.width < atlasSize && rect.y + rect.height < atlasSize)
+            {
+                atlas.SetPixel(rect.x + rect.width, rect.y + rect.height, pixels[rect.height * rect.width - 1]); // 右下角
+            }
         }
 
         atlas.Apply();
@@ -223,14 +286,27 @@ public class AtlasGenerator
 
     private static Texture2D MakeTextureReadable(Texture2D texture)
     {
-        // 创建可读纹理副本
-        RenderTexture renderTex = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.Default, RenderTextureReadWrite.Linear);
+        // 检查纹理的颜色空间设置
+        bool isLinear = false;
+        string texturePath = AssetDatabase.GetAssetPath(texture);
+        if (!string.IsNullOrEmpty(texturePath))
+        {
+            TextureImporter importer = AssetImporter.GetAtPath(texturePath) as TextureImporter;
+            if (importer != null)
+            {
+                isLinear = importer.sRGBTexture == false;
+            }
+        }
+        
+        // 根据纹理的颜色空间设置选择正确的RenderTexture格式
+        RenderTextureReadWrite readWrite = isLinear ? RenderTextureReadWrite.Linear : RenderTextureReadWrite.sRGB;
+        RenderTexture renderTex = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.Default, readWrite);
         
         Graphics.Blit(texture, renderTex);
         RenderTexture previous = RenderTexture.active;
         RenderTexture.active = renderTex;
         
-        Texture2D readableTexture = new Texture2D(texture.width, texture.height);
+        Texture2D readableTexture = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, false, isLinear);
         readableTexture.ReadPixels(new Rect(0, 0, renderTex.width, renderTex.height), 0, 0);
         readableTexture.Apply();
         
