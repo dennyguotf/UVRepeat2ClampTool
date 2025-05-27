@@ -181,6 +181,8 @@ public class AtlasGenerator
         atlas.filterMode = FilterMode.Bilinear;
         
         // 初始化为白色而不是透明，避免缝隙问题
+        // 问题解释：如果初始化为透明色，当UV坐标有微小偏差时，
+        // GPU的双线性过滤会将透明像素与纹理像素混合，导致边缘变暗或出现缝隙
         var clearPixels = new Color[atlasSize * atlasSize];
         for (int i = 0; i < clearPixels.Length; i++)
         {
@@ -220,68 +222,95 @@ public class AtlasGenerator
                 }
             }
             
-            // 扩展边缘像素以防止缝隙（边缘填充）
-            // 左边缘
-            if (rect.x > 0)
-            {
-                for (int y = 0; y < rect.height; y++)
-                {
-                    Color edgeColor = pixels[y * rect.width];
-                    atlas.SetPixel(rect.x - 1, rect.y + y, edgeColor);
-                }
-            }
+            // 增强边缘扩展以应对Mipmap问题
+            // 计算需要扩展的像素数：基于Atlas尺寸动态计算
+            int edgePadding = CalculateEdgePaddingForMipmap(atlasSize);
             
-            // 右边缘
-            if (rect.x + rect.width < atlasSize)
+            // 多层边缘扩展
+            for (int layer = 1; layer <= edgePadding; layer++)
             {
-                for (int y = 0; y < rect.height; y++)
+                // 左边缘扩展
+                if (rect.x - layer >= 0)
                 {
-                    Color edgeColor = pixels[y * rect.width + (rect.width - 1)];
-                    atlas.SetPixel(rect.x + rect.width, rect.y + y, edgeColor);
+                    for (int y = -layer; y < rect.height + layer; y++)
+                    {
+                        int srcY = Mathf.Clamp(y, 0, rect.height - 1);
+                        Color edgeColor = pixels[srcY * rect.width]; // 取最左边的像素
+                        int dstY = rect.y + y;
+                        if (dstY >= 0 && dstY < atlasSize)
+                        {
+                            atlas.SetPixel(rect.x - layer, dstY, edgeColor);
+                        }
+                    }
                 }
-            }
-            
-            // 上边缘
-            if (rect.y > 0)
-            {
-                for (int x = 0; x < rect.width; x++)
+                
+                // 右边缘扩展
+                if (rect.x + rect.width + layer - 1 < atlasSize)
                 {
-                    Color edgeColor = pixels[x];
-                    atlas.SetPixel(rect.x + x, rect.y - 1, edgeColor);
+                    for (int y = -layer; y < rect.height + layer; y++)
+                    {
+                        int srcY = Mathf.Clamp(y, 0, rect.height - 1);
+                        Color edgeColor = pixels[srcY * rect.width + (rect.width - 1)]; // 取最右边的像素
+                        int dstY = rect.y + y;
+                        if (dstY >= 0 && dstY < atlasSize)
+                        {
+                            atlas.SetPixel(rect.x + rect.width + layer - 1, dstY, edgeColor);
+                        }
+                    }
                 }
-            }
-            
-            // 下边缘
-            if (rect.y + rect.height < atlasSize)
-            {
-                for (int x = 0; x < rect.width; x++)
+                
+                // 上边缘扩展
+                if (rect.y - layer >= 0)
                 {
-                    Color edgeColor = pixels[(rect.height - 1) * rect.width + x];
-                    atlas.SetPixel(rect.x + x, rect.y + rect.height, edgeColor);
+                    for (int x = -layer; x < rect.width + layer; x++)
+                    {
+                        int srcX = Mathf.Clamp(x, 0, rect.width - 1);
+                        Color edgeColor = pixels[srcX]; // 取最上边的像素
+                        int dstX = rect.x + x;
+                        if (dstX >= 0 && dstX < atlasSize)
+                        {
+                            atlas.SetPixel(dstX, rect.y - layer, edgeColor);
+                        }
+                    }
                 }
-            }
-            
-            // 四个角落
-            if (rect.x > 0 && rect.y > 0)
-            {
-                atlas.SetPixel(rect.x - 1, rect.y - 1, pixels[0]); // 左上角
-            }
-            if (rect.x + rect.width < atlasSize && rect.y > 0)
-            {
-                atlas.SetPixel(rect.x + rect.width, rect.y - 1, pixels[rect.width - 1]); // 右上角
-            }
-            if (rect.x > 0 && rect.y + rect.height < atlasSize)
-            {
-                atlas.SetPixel(rect.x - 1, rect.y + rect.height, pixels[(rect.height - 1) * rect.width]); // 左下角
-            }
-            if (rect.x + rect.width < atlasSize && rect.y + rect.height < atlasSize)
-            {
-                atlas.SetPixel(rect.x + rect.width, rect.y + rect.height, pixels[rect.height * rect.width - 1]); // 右下角
+                
+                // 下边缘扩展
+                if (rect.y + rect.height + layer - 1 < atlasSize)
+                {
+                    for (int x = -layer; x < rect.width + layer; x++)
+                    {
+                        int srcX = Mathf.Clamp(x, 0, rect.width - 1);
+                        Color edgeColor = pixels[(rect.height - 1) * rect.width + srcX]; // 取最下边的像素
+                        int dstX = rect.x + x;
+                        if (dstX >= 0 && dstX < atlasSize)
+                        {
+                            atlas.SetPixel(dstX, rect.y + rect.height + layer - 1, edgeColor);
+                        }
+                    }
+                }
             }
         }
 
         atlas.Apply();
         return atlas;
+    }
+
+    /// <summary>
+    /// 根据Atlas尺寸计算边缘扩展像素数，以应对Mipmap问题
+    /// </summary>
+    /// <param name="atlasSize">Atlas尺寸</param>
+    /// <returns>边缘扩展像素数</returns>
+    private static int CalculateEdgePaddingForMipmap(int atlasSize)
+    {
+        // 计算mipmap级别数
+        int mipmapLevels = Mathf.FloorToInt(Mathf.Log(atlasSize, 2)) + 1;
+        
+        // 边缘扩展像素数应该至少覆盖最高几个mipmap级别的采样范围
+        // 经验值：Atlas尺寸的1/512，最小2像素，最大8像素
+        int padding = Mathf.Max(2, Mathf.Min(8, atlasSize / 512));
+        
+        Debug.Log($"Atlas尺寸: {atlasSize}, Mipmap级别: {mipmapLevels}, 边缘扩展: {padding}像素");
+        return padding;
     }
 
     private static Texture2D MakeTextureReadable(Texture2D texture)

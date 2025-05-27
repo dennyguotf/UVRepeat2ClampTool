@@ -468,9 +468,6 @@ public class AutoPrefabCombineTool : EditorWindow
 
     private Mesh CombineLargeMeshes(List<CombineInstance> combineInstances, int totalVertices)
     {
-        // 如果还是失败，尝试分组合并
-        return CombineMeshesInGroups(combineInstances);
-
         var combinedMesh = new Mesh();
         combinedMesh.name = outputName + "_Mesh";
         
@@ -773,15 +770,22 @@ public class AutoPrefabCombineTool : EditorWindow
                     importer.filterMode = FilterMode.Bilinear;
                     // 确保sRGB设置正确
                     importer.sRGBTexture = true; // 大多数Albedo纹理应该是sRGB
-                    // 禁用mipmap以避免边缘模糊
-                    importer.mipmapEnabled = false;
+                    
+                    // 重新启用mipmap，但使用高质量设置
+                    importer.mipmapEnabled = true;
+                    // 使用Kaiser过滤器，减少mipmap缝隙
+                    importer.mipmapFilter = TextureImporterMipFilter.KaiserFilter;
+                    // 保持边缘锐利度
+                    importer.borderMipmap = true; // 边界mipmap，有助于减少边缘问题
+                    
                     // 设置最大纹理尺寸
                     importer.maxTextureSize = atlasSize;
+
                     // 设置压缩格式
                     importer.textureCompression = TextureImporterCompression.Uncompressed; // 避免压缩导致的颜色失真
-                    
+
                     importer.SaveAndReimport();
-                    Debug.Log("Atlas纹理导入设置已配置，Wrap Mode设置为Clamp，颜色空间设置为sRGB");
+                    Debug.Log("Atlas纹理导入设置已配置：启用Mipmap，Wrap Mode=Clamp，使用Kaiser过滤器");
                 }
             }
             else
@@ -834,13 +838,22 @@ public class AutoPrefabCombineTool : EditorWindow
                 Vector2 offset = packResult.uvOffsets[mapping.textureIndex];
                 Vector2 scale = packResult.uvScales[mapping.textureIndex];
                 
-                // 添加边缘收缩以防止采样到边界外的像素
-                float shrinkAmount = 0.5f / atlasSize; // 收缩半个像素
-                Vector2 shrinkOffset = new Vector2(shrinkAmount, shrinkAmount);
+                // 为Mipmap支持增加更大的边缘收缩
+                // 根据Atlas尺寸动态计算收缩量
+                float mipmapSafePadding = CalculateMipmapSafePadding(atlasSize);
+                Vector2 shrinkOffset = new Vector2(mipmapSafePadding, mipmapSafePadding);
                 Vector2 shrinkScale = scale - shrinkOffset * 2;
                 Vector2 adjustedOffset = offset + shrinkOffset;
                 
-                Debug.Log($"应用UV变换: offset({adjustedOffset.x:F3}, {adjustedOffset.y:F3}), scale({shrinkScale.x:F3}, {shrinkScale.y:F3})");
+                // 确保收缩后的尺寸仍然有效
+                if (shrinkScale.x <= 0 || shrinkScale.y <= 0)
+                {
+                    Debug.LogWarning($"网格 {meshIdx} 的纹理区域太小，无法进行安全的UV收缩，跳过收缩");
+                    shrinkScale = scale * 0.9f; // 使用90%的尺寸作为备用方案
+                    adjustedOffset = offset + (scale - shrinkScale) * 0.5f;
+                }
+
+                Debug.Log($"应用UV变换: offset({adjustedOffset.x:F3}, {adjustedOffset.y:F3}), scale({shrinkScale.x:F3}, {shrinkScale.y:F3}), 收缩量({mipmapSafePadding:F3})");
 
                 // 重映射该网格范围内的所有UV坐标
                 for (int i = vertexRange.start; i < vertexRange.end && i < newUVs.Length; i++)
@@ -887,6 +900,24 @@ public class AutoPrefabCombineTool : EditorWindow
         mesh.uv = newUVs;
         Debug.Log("精确UV重映射完成");
         return mesh;
+    }
+    
+    /// <summary>
+    /// 计算Mipmap安全的UV收缩量
+    /// </summary>
+    /// <param name="atlasSize">Atlas尺寸</param>
+    /// <returns>收缩量</returns>
+    private float CalculateMipmapSafePadding(int atlasSize)
+    {
+        // 计算边缘扩展像素数
+        int edgePadding = Mathf.Max(2, Mathf.Min(8, atlasSize / 512));
+        
+        // UV收缩量应该略大于边缘扩展，确保不会采样到边界
+        // 收缩 (edgePadding + 0.5) 个像素的距离
+        float padding = (edgePadding + 0.5f) / atlasSize;
+        
+        Debug.Log($"Atlas尺寸: {atlasSize}, 边缘扩展: {edgePadding}像素, UV收缩量: {padding:F4}");
+        return padding;
     }
 
     private struct VertexRange
